@@ -3,12 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#111716">
-  <meta name="description" content="Descobre filmes, explora generos, consulta detalhes e guarda os teus favoritos no CineAtlas.">
-  <title>CineAtlas | Encontra o teu proximo filme</title>
+  <meta name="theme-color" content="#162b25">
+  <meta name="description" content="CineAtlas: explora filmes, pesquisa titulos e guarda os teus favoritos.">
+  <title>CineAtlas | Descobre o proximo filme</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="preconnect" href="https://v3-cinemeta.strem.io">
-  <link rel="preconnect" href="https://images.metahub.space">
   <link rel="stylesheet" href="styles.css">
   <script defer src="https://cdn.jsdelivr.net/npm/vue@3.5.22/dist/vue.global.prod.js"></script>
   <script defer src="app.js"></script>
@@ -16,141 +15,63 @@
 <body>
   <div id="app" v-cloak>
     <header class="site-header">
-      <div class="container header-content">
-        <a class="brand" href="#inicio" @click="goHome" aria-label="CineAtlas, pagina inicial">
-          <span class="brand-symbol" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
-          <span>CINE<span class="brand-light">ATLAS</span><small>O cinema comeca aqui</small></span>
-        </a>
+      <div class="container header-inner">
+        <a class="brand" href="#inicio" @click.prevent="goHome" aria-label="CineAtlas, pagina inicial"><span class="brand-mark">C<span>A</span></span><span>Cine<strong>Atlas</strong></span></a>
         <nav class="main-nav" aria-label="Navegacao principal">
-          <button type="button" :class="['nav-link', { active: view === 'explore' }]" @click="showExplore">Explorar</button>
-          <button type="button" :class="['nav-link', { active: view === 'favorites' }]" @click="showFavorites">A minha lista <span class="nav-count">{{ favorites.length }}</span></button>
+          <button type="button" :class="['nav-link', { active: view === 'explore' }]" :aria-current="view === 'explore' ? 'page' : null" @click="showExplore">Explorar</button>
+          <button type="button" :class="['nav-link', { active: view === 'favorites' }]" :aria-current="view === 'favorites' ? 'page' : null" @click="showFavorites">A minha lista <span class="nav-count">{{ favorites.length }}</span></button>
         </nav>
-        <button type="button" class="header-action" @click="scrollToCatalog">Ver catalogo <span aria-hidden="true">↗</span></button>
       </div>
     </header>
 
     <main id="inicio">
       <section class="hero">
-        <div class="hero-grain" aria-hidden="true"></div>
-        <div class="container hero-grid">
+        <div class="container hero-layout">
           <div class="hero-copy">
-            <div class="eyebrow"><span class="eyebrow-line"></span> A TUA PROXIMA SESSAO COMECA AQUI</div>
-            <h1>Historias para <em>sentir.</em><br>Filmes para <em>descobrir.</em></h1>
-            <p>Dos grandes classicos aos sucessos mais recentes. Explora, encontra algo novo e guarda os filmes que merecem um lugar na tua lista.</p>
-            <div class="hero-buttons">
-              <button type="button" class="btn btn-accent" @click="scrollToCatalog">Explorar filmes <span aria-hidden="true">↗</span></button>
-              <button type="button" class="btn btn-outline" @click="surpriseMe"><span class="dice" aria-hidden="true">✦</span> Surpreende-me</button>
-            </div>
-            <div class="hero-footer"><span class="live-dot"></span> Catalogo actualizado pela base Cinemeta</div>
+            <span class="eyebrow">FILMES, HISTORIAS E DESCOBERTAS</span>
+            <h1>O teu proximo<br><em>grande filme.</em></h1>
+            <p>Explora titulos, encontra boas historias e guarda os filmes que queres ver. Um catalogo simples para quem gosta de cinema.</p>
+            <div class="hero-buttons"><button type="button" class="btn btn-primary" @click="scrollToCatalog">Explorar catalogo <span aria-hidden="true">&#8599;</span></button><button type="button" class="btn btn-ghost" @click="surpriseMe">Surpreende-me <span aria-hidden="true">&#10022;</span></button></div>
+            <span class="hero-note"><span class="online-dot"></span> Informacao obtida da Cinemeta</span>
           </div>
-          <div class="hero-art" aria-hidden="true">
-            <div class="hero-orbit orbit-one"></div>
-            <div class="hero-orbit orbit-two"></div>
-            <div class="hero-disc"><div class="disc-core"></div></div>
-            <div class="hero-card hero-card-back"><span>O MELHOR DO CINEMA</span><strong>UMA HISTORIA<br>DE CADA VEZ.</strong><small>FILMES · DESCOBERTAS · EMOCOES</small></div>
-            <div class="hero-card hero-card-front" v-if="featuredFilm">
-              <img v-if="featuredFilm.poster" :src="featuredFilm.poster" :alt="featuredFilm.name" @error="hideImage" referrerpolicy="no-referrer">
-              <div class="hero-card-overlay"><span>EM DESTAQUE</span><strong>{{ featuredFilm.name }}</strong><small>{{ movieYear(featuredFilm) || 'Cinema' }} <span v-if="movieRating(featuredFilm)">· ★ {{ movieRating(featuredFilm).toFixed(1) }}</span></small></div>
-            </div>
-            <div class="hero-ticket"><span>01 / 03</span><span>ENCONTRE O SEU FILME</span></div>
+          <div class="hero-visual" aria-hidden="true">
+            <div class="hero-art-back"></div>
+            <div class="hero-feature" v-if="featuredFilm"><img :src="featuredFilm.poster" alt="" @error="hideImage" referrerpolicy="no-referrer"><div class="hero-feature-bottom"><small>EM DESTAQUE</small><strong>{{ featuredFilm.name }}</strong><span>{{ movieYear(featuredFilm) || 'Cinema' }} <span v-if="movieRating(featuredFilm)"> &#183; &#9733; {{ movieRating(featuredFilm).toFixed(1) }}</span></span></div></div>
+            <div class="hero-feature hero-feature-empty" v-else><span class="film-symbol">&#9670;</span><strong>HISTORIAS<br>QUE FICAM.</strong><small>CINEATLAS / 2026</small></div>
           </div>
         </div>
       </section>
 
-      <section class="quick-stats" aria-label="Informacao do catalogo">
-        <div class="container stats-grid">
-          <div class="stat"><span class="stat-symbol">✳</span><div><strong>{{ items.length || '—' }}</strong><small>Filmes carregados</small></div></div>
-          <div class="stat"><span class="stat-symbol">◈</span><div><strong>{{ genres.length - 1 }}</strong><small>Generos para explorar</small></div></div>
-          <div class="stat"><span class="stat-symbol">♡</span><div><strong>{{ favorites.length }}</strong><small>Na tua lista</small></div></div>
-          <div class="stats-caption">DESCUBRE. ESCOLHE. GUARDA.</div>
-        </div>
-      </section>
-
-      <section class="catalog-section" id="catalogo">
+      <section id="catalogo" class="catalog-section">
         <div class="container">
-          <div class="section-heading">
-            <div><div class="section-kicker">A TUA SELECAO DE FILMES</div><h2>{{ view === 'favorites' ? 'A minha lista' : 'Explora o catalogo' }}<span class="heading-dot">.</span></h2><p>{{ view === 'favorites' ? 'Os filmes que escolheste guardar, num so lugar.' : 'Encontra o proximo filme que vais querer ver.' }}</p></div>
-            <div class="heading-decoration" aria-hidden="true">C / A <span>2026</span></div>
-          </div>
-
-          <div class="search-toolbar">
-            <label class="search-field" for="movie-search">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
-              <input id="movie-search" type="search" v-model.trim="searchQuery" placeholder="Pesquisa pelo nome de um filme..." autocomplete="off">
-              <kbd v-if="!searchQuery">/</kbd>
-              <button v-else type="button" class="clear-search" @click="searchQuery = ''" aria-label="Limpar pesquisa">×</button>
-            </label>
-            <div class="toolbar-filters">
-              <label class="select-wrap"><span>Ano</span><select v-model="yearFilter" aria-label="Filtrar por ano"><option value="all">Qualquer ano</option><option value="2020">2020 - hoje</option><option value="2010">2010 - 2019</option><option value="2000">2000 - 2009</option><option value="1990">1990 - 1999</option><option value="classic">Antes de 1990</option></select></label>
-              <label class="select-wrap"><span>Nota</span><select v-model.number="ratingFilter" aria-label="Filtrar por nota"><option :value="0">Todas</option><option :value="8">8.0 ou mais</option><option :value="7">7.0 ou mais</option><option :value="6">6.0 ou mais</option></select></label>
+          <div class="section-header"><div><span class="section-kicker">O CATALOGO</span><h2>{{ view === 'favorites' ? 'A minha lista' : 'Explorar filmes' }}</h2><p>{{ view === 'favorites' ? 'Os filmes que guardaste para ver mais tarde.' : 'Pesquisa e combina filtros para encontrar algo do teu gosto.' }}</p></div><span class="section-number">01 / CINEATLAS</span></div>
+          <div class="filters-panel">
+            <div class="filters-top">
+              <label class="search-field" for="movie-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.7" cy="10.7" r="6.8"></circle><path d="m16 16 5 5"></path></svg><input id="movie-search" type="search" v-model="searchQuery" placeholder="Pesquisar pelo titulo do filme" autocomplete="off"><kbd v-if="!searchQuery">/</kbd><button v-else type="button" class="clear-search" @click="searchQuery = ''" aria-label="Limpar pesquisa">&#215;</button></label>
+              <label class="select-field"><span>Ano</span><select v-model="yearFilter" aria-label="Filtrar por ano"><option value="all">Todos os anos</option><option value="2020">2020 em diante</option><option value="2010">2010 - 2019</option><option value="2000">2000 - 2009</option><option value="1990">1990 - 1999</option><option value="classic">Antes de 1990</option></select></label>
+              <label class="select-field"><span>Avaliacao</span><select v-model.number="ratingFilter" aria-label="Filtrar por avaliacao"><option :value="0">Todas as notas</option><option :value="8">8.0 ou mais</option><option :value="7">7.0 ou mais</option><option :value="6">6.0 ou mais</option></select></label>
             </div>
+            <div class="genres-row" aria-label="Filtrar por genero"><button v-for="genre in genres" :key="genre.value" type="button" :class="['genre-chip', { selected: selectedGenre === genre.value }]" :aria-pressed="selectedGenre === genre.value" @click="selectGenre(genre.value)">{{ genre.label }}</button></div>
           </div>
 
-          <div class="genres-row" aria-label="Filtrar por genero">
-            <button v-for="genre in genres" :key="genre.value" type="button" :class="['genre-chip', { selected: selectedGenre === genre.value }]" @click="selectGenre(genre.value)">{{ genre.label }}</button>
-          </div>
+          <div class="results-heading"><div class="results-title"><strong>{{ resultsLabel }}</strong><span v-if="!loading">{{ visibleFilms.length }} {{ visibleFilms.length === 1 ? 'filme' : 'filmes' }}</span></div><label class="sort-field">Ordenar <select v-model="sortBy" aria-label="Ordenar filmes"><option value="featured">Destaques</option><option value="rating">Melhor avaliacao</option><option value="newest">Mais recentes</option><option value="oldest">Mais antigos</option><option value="name">Titulo A - Z</option></select></label></div>
+          <p v-if="localFilterActive && view === 'explore' && !loading" class="filter-note">Os filtros de ano e avaliacao consideram os filmes consultados. Podes continuar a procurar nas paginas seguintes.</p>
 
-          <div class="results-heading">
-            <div class="results-info"><span class="results-mark"></span><strong>{{ view === 'favorites' ? 'Filmes guardados' : searchQuery ? 'Resultados da pesquisa' : selectedGenre ? 'Selecao por genero' : 'Filmes em destaque' }}</strong><span class="results-count" v-if="!loading">{{ visibleFilms.length }} {{ visibleFilms.length === 1 ? 'filme' : 'filmes' }}</span></div>
-            <label class="sort-wrap">Ordenar por <select v-model="sortBy" aria-label="Ordenar filmes"><option value="featured">Destaques</option><option value="rating">Melhor avaliacao</option><option value="newest">Mais recentes</option><option value="oldest">Mais antigos</option><option value="name">Titulo A - Z</option></select></label>
-          </div>
-
-          <div v-if="loading && view === 'explore'" class="films-grid" aria-label="A carregar filmes">
-            <div v-for="n in 10" :key="n" class="movie-card skeleton-card"><div class="skeleton-poster"></div><div class="skeleton-line long"></div><div class="skeleton-line short"></div></div>
-          </div>
-          <div v-else-if="error && view === 'explore' && !items.length" class="empty-state">
-            <span class="empty-icon">⌁</span><h3>Nao foi possivel carregar os filmes</h3><p>{{ error }}</p><button type="button" class="btn btn-dark" @click="fetchMovies(false)">Tentar novamente ↗</button>
-          </div>
-          <div v-else-if="!visibleFilms.length" class="empty-state">
-            <span class="empty-icon">◇</span><h3>{{ view === 'favorites' && !favorites.length ? 'A tua lista ainda esta vazia' : 'Nenhum filme encontrado' }}</h3><p>{{ view === 'favorites' && !favorites.length ? 'Guarda os teus filmes preferidos com o simbolo do coracao.' : 'Experimenta outro nome ou remove alguns filtros.' }}</p><button type="button" class="btn btn-dark" @click="resetFilters">{{ view === 'favorites' && !favorites.length ? 'Explorar filmes' : 'Limpar filtros' }} ↗</button>
-          </div>
-          <div v-else class="films-grid">
-            <article v-for="(movie, index) in visibleFilms" :key="movie.id" class="movie-card">
-              <button type="button" class="poster-button" @click="openMovie(movie)" :aria-label="'Ver detalhes de ' + movie.name">
-                <div class="poster-fallback"><span>CA</span><small>CINEATLAS</small></div>
-                <img v-if="movie.poster" :src="movie.poster" :alt="'Cartaz de ' + movie.name" loading="lazy" referrerpolicy="no-referrer" @error="hideImage">
-                <span class="poster-shade"></span>
-                <span class="poster-index">{{ String(index + 1).padStart(2, '0') }}</span>
-                <span v-if="movieRating(movie)" class="poster-rating">★ {{ movieRating(movie).toFixed(1) }}</span>
-                <span class="poster-view">Ver detalhes <span aria-hidden="true">↗</span></span>
-              </button>
-              <button type="button" :class="['favorite-button', { saved: isFavorite(movie.id) }]" :aria-label="isFavorite(movie.id) ? 'Remover ' + movie.name + ' da lista' : 'Guardar ' + movie.name + ' na lista'" :aria-pressed="isFavorite(movie.id)" @click="toggleFavorite(movie)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 4.8a5.5 5.5 0 0 0-7.7 0l-.8.8-.8-.8a5.5 5.5 0 0 0-7.7 7.8l8.5 8.3 8.5-8.3a5.5 5.5 0 0 0 0-7.8Z"></path></svg></button>
-              <button type="button" class="movie-title" @click="openMovie(movie)">{{ movie.name }}</button>
-              <div class="movie-meta"><span>{{ movieYear(movie) || 'Ano indisponivel' }}</span><span class="meta-separator"></span><span>{{ genreLabel(movie) }}</span></div>
-            </article>
-          </div>
-
-          <div v-if="error && items.length && view === 'explore'" class="load-message" role="status">{{ error }} <button type="button" @click="fetchMovies(true)">Voltar a tentar</button></div>
-          <div v-if="view === 'explore' && hasMore && !loading && !searchQuery && !yearFilterActive && !ratingFilter && !error" class="load-more"><button type="button" class="btn btn-load" :disabled="loadingMore" @click="fetchMovies(true)">{{ loadingMore ? 'A carregar...' : 'Mostrar mais filmes' }} <span v-if="!loadingMore" aria-hidden="true">↓</span></button></div>
-          <div v-else-if="view === 'explore' && hasMore && !loading && !error && visibleFilms.length && (searchQuery || yearFilterActive || ratingFilter)" class="load-more"><button type="button" class="btn btn-load" :disabled="loadingMore" @click="fetchMovies(true)">{{ loadingMore ? 'A carregar...' : 'Procurar em mais filmes' }} <span v-if="!loadingMore" aria-hidden="true">↓</span></button></div>
+          <div v-if="loading && view === 'explore'" class="films-grid" aria-label="A carregar filmes"><div v-for="n in 10" :key="n" class="movie-card"><div class="skeleton-poster"></div><div class="skeleton-line"></div><div class="skeleton-line short"></div></div></div>
+          <div v-else-if="error && view === 'explore' && !items.length" class="empty-state" role="alert"><div class="empty-icon">!</div><h3>Nao foi possivel carregar os filmes</h3><p>{{ error }}</p><button type="button" class="btn btn-dark" @click="fetchMovies()">Tentar novamente</button></div>
+          <div v-else-if="!visibleFilms.length" class="empty-state"><div class="empty-icon">&#9671;</div><h3>{{ view === 'favorites' && !favorites.length ? 'A tua lista ainda esta vazia' : 'Nenhum filme nesta selecao' }}</h3><p>{{ view === 'favorites' && !favorites.length ? 'Guarda os teus filmes preferidos para os encontrares aqui.' : hasMore && view === 'explore' ? 'Ainda nao foram encontrados filmes com estes filtros. Continua a pesquisa nas paginas seguintes.' : 'Experimenta outra pesquisa ou remove alguns filtros.' }}</p><button type="button" class="btn btn-dark" @click="resetFilters">{{ view === 'favorites' && !favorites.length ? 'Explorar filmes' : 'Limpar filtros' }}</button></div>
+          <div v-else class="films-grid"><article v-for="movie in visibleFilms" :key="movie.id" class="movie-card"><button type="button" class="poster-button" @click="openMovie(movie)" :aria-label="'Ver detalhes de ' + movie.name"><span class="poster-fallback"><strong>CA</strong><small>CINEATLAS</small></span><img v-if="safeImage(movie.poster)" :src="safeImage(movie.poster)" :alt="'Cartaz de ' + movie.name" loading="lazy" referrerpolicy="no-referrer" @error="hideImage"><span class="poster-tint"></span><span class="poster-view">Ver detalhes &#8599;</span><span v-if="movieRating(movie)" class="poster-rating">&#9733; {{ movieRating(movie).toFixed(1) }}</span></button><button type="button" :class="['favorite-button', { saved: isFavorite(movie.id) }]" :aria-label="isFavorite(movie.id) ? 'Remover ' + movie.name + ' dos favoritos' : 'Guardar ' + movie.name + ' nos favoritos'" :aria-pressed="isFavorite(movie.id)" @click="toggleFavorite(movie)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 4.8a5.5 5.5 0 0 0-7.7 0l-.8.8-.8-.8a5.5 5.5 0 0 0-7.7 7.8l8.5 8.3 8.5-8.3a5.5 5.5 0 0 0 0-7.8Z"></path></svg></button><button type="button" class="movie-title" @click="openMovie(movie)">{{ movie.name }}</button><div class="movie-meta"><span>{{ movieYear(movie) || 'Ano indisponivel' }}</span><span class="meta-dot"></span><span>{{ genreLabel(movie) }}</span></div></article></div>
+          <p v-if="error && items.length && view === 'explore'" class="inline-error" role="status">{{ error }} <button type="button" @click="fetchMovies(true)">Voltar a tentar</button></p>
+          <div v-if="view === 'explore' && hasMore && !loading && !error" class="load-more"><button type="button" class="btn btn-outline-dark" :disabled="loadingMore" @click="fetchMovies(true)">{{ loadingMore ? 'A procurar filmes...' : localFilterActive ? 'Procurar em mais filmes' : 'Carregar mais filmes' }} <span v-if="!loadingMore" aria-hidden="true">&#8595;</span></button></div>
         </div>
       </section>
-
-      <section class="outro-section"><div class="container outro-grid"><div><div class="section-kicker">UMA BOA HISTORIA ESPERA POR TI</div><h2>O proximo favorito<br>esta a uma <em>escolha.</em></h2></div><button type="button" class="outro-link" @click="surpriseMe">Escolher um filme ao acaso <span aria-hidden="true">↗</span></button></div></section>
     </main>
 
-    <footer class="site-footer"><div class="container footer-inner"><div class="footer-brand">CINE<span>ATLAS</span><small>Filmes para descobrir.</small></div><p>Um espaco para quem gosta de cinema.<br>Informacao de filmes fornecida por <a href="https://v3-cinemeta.strem.io/manifest.json" target="_blank" rel="noopener noreferrer">Cinemeta</a>.</p><div class="footer-side">FEITO PARA QUEM GOSTA DE FILMES <span>© 2026 CINEATLAS</span></div></div></footer>
+    <footer class="site-footer"><div class="container footer-inner"><div class="footer-brand">Cine<strong>Atlas</strong><small>Uma boa historia comeca com uma escolha.</small></div><p>Dados de filmes: <a href="https://v3-cinemeta.strem.io/manifest.json" target="_blank" rel="noopener noreferrer">Cinemeta</a><br>Catalogo informativo, sem reproducao de filmes.</p><span>2026 &#169; CINEATLAS</span></div></footer>
 
-    <div v-if="activeFilm" class="modal-backdrop" @click.self="closeMovie" role="presentation">
-      <section class="movie-modal" role="dialog" aria-modal="true" :aria-label="'Detalhes de ' + activeFilm.name" tabindex="-1" ref="movieDialog">
-        <button type="button" class="modal-close" @click="closeMovie" aria-label="Fechar detalhes">×</button>
-        <div class="modal-poster"><div class="modal-poster-placeholder">CINEATLAS</div><img v-if="activeFilm.poster" :src="activeFilm.poster" :alt="'Cartaz de ' + activeFilm.name" @error="hideImage" referrerpolicy="no-referrer"></div>
-        <div class="modal-content">
-          <span class="modal-kicker">FICHA DO FILME <span> / {{ activeFilm.id }}</span></span>
-          <h2>{{ activeFilm.name }}</h2>
-          <div class="modal-info"><span>{{ movieYear(activeFilm) || 'Ano indisponivel' }}</span><span v-if="activeFilm.runtime">{{ activeFilm.runtime }}</span><span v-if="movieRating(activeFilm)" class="modal-score">★ {{ movieRating(activeFilm).toFixed(1) }} / 10</span></div>
-          <div class="modal-genres"><span v-for="genre in (activeFilm.genres || []).slice(0, 5)" :key="genre">{{ genre }}</span></div>
-          <div class="modal-divider"></div>
-          <h3>Sinopse</h3>
-          <p class="synopsis">{{ activeFilm.description || 'Ainda nao existe uma sinopse disponivel para este filme.' }}</p>
-          <p v-if="detailsLoading" class="details-loading">A carregar informacao adicional...</p>
-          <div class="movie-credits" v-if="activeFilm.director || (activeFilm.cast && activeFilm.cast.length)"><div v-if="activeFilm.director"><strong>Realizacao</strong><span>{{ formatPeople(activeFilm.director) }}</span></div><div v-if="activeFilm.cast && activeFilm.cast.length"><strong>Elenco principal</strong><span>{{ activeFilm.cast.slice(0, 5).join(', ') }}</span></div></div>
-          <div class="modal-actions"><button type="button" class="btn btn-accent" @click="toggleFavorite(activeFilm)">{{ isFavorite(activeFilm.id) ? 'Remover da minha lista' : 'Guardar na minha lista' }} <span aria-hidden="true">{{ isFavorite(activeFilm.id) ? '✓' : '♡' }}</span></button><a v-if="imdbLink(activeFilm)" class="btn btn-external" :href="imdbLink(activeFilm)" target="_blank" rel="noopener noreferrer">Ver no IMDb ↗</a></div>
-        </div>
-      </section>
-    </div>
+    <div v-if="activeFilm" class="modal-backdrop" @click.self="closeMovie"><section class="movie-modal" role="dialog" aria-modal="true" :aria-label="'Detalhes de ' + activeFilm.name" tabindex="-1" ref="movieDialog"><button type="button" class="modal-close" @click="closeMovie" aria-label="Fechar detalhes">&#215;</button><div class="modal-poster"><span class="modal-poster-fallback">CINEATLAS</span><img v-if="safeImage(activeFilm.poster)" :src="safeImage(activeFilm.poster)" :alt="'Cartaz de ' + activeFilm.name" referrerpolicy="no-referrer" @error="hideImage"></div><div class="modal-content"><span class="modal-kicker">FICHA DO FILME</span><h2>{{ activeFilm.name }}</h2><div class="modal-info"><span>{{ movieYear(activeFilm) || 'Ano indisponivel' }}</span><span v-if="activeFilm.runtime">{{ activeFilm.runtime }}</span><span v-if="movieRating(activeFilm)" class="modal-score">&#9733; {{ movieRating(activeFilm).toFixed(1) }} / 10</span></div><div class="modal-genres"><span v-for="genre in (activeFilm.genres || []).slice(0, 5)" :key="genre">{{ genre }}</span></div><div class="modal-divider"></div><h3>Sinopse</h3><p class="synopsis">{{ activeFilm.description || 'Ainda nao existe uma sinopse disponivel para este filme.' }}</p><p v-if="detailsLoading" class="details-loading">A carregar mais detalhes...</p><div v-if="activeFilm.director || (activeFilm.cast && activeFilm.cast.length)" class="movie-credits"><div v-if="activeFilm.director"><strong>Realizacao</strong><span>{{ formatPeople(activeFilm.director) }}</span></div><div v-if="activeFilm.cast && activeFilm.cast.length"><strong>Elenco</strong><span>{{ activeFilm.cast.slice(0, 5).join(', ') }}</span></div></div><div class="modal-actions"><button type="button" class="btn btn-dark" @click="toggleFavorite(activeFilm)">{{ isFavorite(activeFilm.id) ? 'Remover dos favoritos' : 'Guardar nos favoritos' }} <span v-if="isFavorite(activeFilm.id)" aria-hidden="true">&#10003;</span><span v-else aria-hidden="true">&#9825;</span></button><a v-if="imdbLink(activeFilm)" class="btn btn-outline-dark" :href="imdbLink(activeFilm)" target="_blank" rel="noopener noreferrer">Ver no IMDb &#8599;</a></div></div></section></div>
     <span class="sr-only" role="status" aria-live="polite">{{ announcement }}</span>
   </div>
-  <noscript>Activa o JavaScript no teu navegador para utilizar o CineAtlas.</noscript>
+  <noscript>Activa o JavaScript para utilizar o CineAtlas.</noscript>
 </body>
 </html>

@@ -1,6 +1,9 @@
 const API_BASE = 'https://v3-cinemeta.strem.io';
 const PAGE_SIZE = 100;
-const STORAGE_KEY = 'cineatlas_favoritos_v1';
+const STORAGE_KEY = 'cineatlas_favoritos_v2';
+const OLD_STORAGE_KEY = 'cineatlas_favoritos_v1';
+const MIN_VISIBLE = 12;
+const MAX_PAGES_PER_LOAD = 3;
 
 const app = Vue.createApp({
   data() {
@@ -13,8 +16,8 @@ const app = Vue.createApp({
       yearFilter: 'all',
       ratingFilter: 0,
       sortBy: 'featured',
-      page: 0,
-      hasMore: false,
+      page: -1,
+      hasMore: true,
       loading: true,
       loadingMore: false,
       detailsLoading: false,
@@ -22,9 +25,12 @@ const app = Vue.createApp({
       activeFilm: null,
       announcement: '',
       requestId: 0,
+      detailRequestId: 0,
       controller: null,
+      detailController: null,
       searchTimer: null,
       previousFocus: null,
+      suspendFetch: false,
       genres: [
         { value: '', label: 'Todos' },
         { value: 'Action', label: 'Acao' },
@@ -42,20 +48,103 @@ const app = Vue.createApp({
   },
   computed: {
     featuredFilm() {
-      return this.items.find(movie => movie.poster && movie.imdbRating) || this.items.find(movie => movie.poster) || null;
+      return this.items.find(movie => this.safeImage(movie.poster)) || null;
     },
-    yearFilterActive() {
-      return this.yearFilter !== 'all';
+    localFilterActive() {
+      return this.yearFilter !== 'all' || this.ratingFilter > 0 || (this.selectedGenre && this.searchQuery.trim().length >= 2);
     },
     visibleFilms() {
-      let movies = this.view === 'favorites' ? [...this.favorites] : [...this.items];
-      const query = this.searchQuery.toLocaleLowerCase().trim();
-
+      return this.filteredMovies(this.view === 'favorites' ? this.favorites : this.items);
+    },
+    resultsLabel() {
+      if (this.view === 'favorites') return 'A minha lista';
+      if (this.searchQuery.trim()) return 'Resultados da pesquisa';
+      if (this.selectedGenre) return 'Filmes por genero';
+      return 'Filmes em destaque';
+    }
+  },
+  watch: {
+    searchQuery() {
+      this.scheduleFetch();
+    },
+    selectedGenre() {
+      this.scheduleFetch();
+    },
+    yearFilter() {
+      this.scheduleFetch();
+    },
+    ratingFilter() {
+      this.scheduleFetch();
+    },
+    activeFilm(film) {
+      document.body.classList.toggle('modal-open', Boolean(film));
+      if (film) this.$nextTick(() => this.$refs.movieDialog?.focus());
+    }
+  },
+  mounted() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || localStorage.getItem(OLD_STORAGE_KEY) || '[]');
+      if (Array.isArray(saved)) {
+        const seen = new Set();
+        this.favorites = saved.map(movie => this.normalizeMovie(movie)).filter(movie => {
+          if (!movie || seen.has(movie.id)) return false;
+          seen.add(movie.id);
+          return true;
+        });
+      }
+    } catch {
+      this.favorites = [];
+    }
+    this.fetchMovies();
+    window.addEventListener('keydown', this.handleKeydown);
+  },
+  beforeUnmount() {
+    this.cancelCatalog();
+    this.cancelDetails();
+    document.body.classList.remove('modal-open');
+    window.removeEventListener('keydown', this.handleKeydown);
+  },
+  methods: {
+    normalizeMovie(movie) {
+      if (!movie || !/^tt\d+$/.test(String(movie.id || '')) || typeof movie.name !== 'string' || !movie.name.trim()) return null;
+      return {
+        id: movie.id,
+        name: movie.name.trim(),
+        type: 'movie',
+        poster: this.safeImage(movie.poster),
+        releaseInfo: String(movie.releaseInfo || movie.year || ''),
+        imdbRating: movie.imdbRating || '',
+        genres: Array.isArray(movie.genres) ? movie.genres.filter(value => typeof value === 'string').slice(0, 10) : [],
+        description: typeof movie.description === 'string' ? movie.description : '',
+        runtime: typeof movie.runtime === 'string' ? movie.runtime : '',
+        director: Array.isArray(movie.director) || typeof movie.director === 'string' ? movie.director : '',
+        cast: Array.isArray(movie.cast) ? movie.cast.filter(value => typeof value === 'string').slice(0, 12) : []
+      };
+    },
+    safeImage(url) {
+      return typeof url === 'string' && /^https:\/\/[^\s]+$/i.test(url) ? url : '';
+    },
+    movieYear(movie) {
+      const match = String(movie.releaseInfo || '').match(/(?:18|19|20)\d{2}/);
+      return match ? Number(match[0]) : 0;
+    },
+    movieRating(movie) {
+      const value = Number.parseFloat(String(movie.imdbRating || '').replace(',', '.'));
+      return Number.isFinite(value) && value >= 0 && value <= 10 ? value : 0;
+    },
+    genreLabel(movie) {
+      const genre = (movie.genres || [])[0] || '';
+      const match = this.genres.find(item => item.value.toLowerCase() === genre.toLowerCase());
+      return match ? match.label : genre || 'Cinema';
+    },
+    filteredMovies(source) {
+      let movies = [...source];
+      const query = this.searchQuery.trim().toLocaleLowerCase();
       if (query && (this.view === 'favorites' || query.length < 2)) {
         movies = movies.filter(movie => movie.name.toLocaleLowerCase().includes(query));
       }
-      if (this.selectedGenre && (this.view === 'favorites' || query)) {
-        movies = movies.filter(movie => (movie.genres || []).some(genre => genre.toLowerCase() === this.selectedGenre.toLowerCase()));
+      if (this.selectedGenre && (this.view === 'favorites' || query.length >= 2)) {
+        movies = movies.filter(movie => movie.genres.some(genre => genre.toLowerCase() === this.selectedGenre.toLowerCase()));
       }
       if (this.yearFilter !== 'all') {
         movies = movies.filter(movie => {
@@ -66,93 +155,88 @@ const app = Vue.createApp({
           return year >= start && (start === 2020 || year < start + 10);
         });
       }
-      if (this.ratingFilter) {
-        movies = movies.filter(movie => this.movieRating(movie) >= this.ratingFilter);
-      }
-      if (this.sortBy === 'rating') {
-        movies.sort((a, b) => this.movieRating(b) - this.movieRating(a));
-      } else if (this.sortBy === 'newest') {
-        movies.sort((a, b) => this.movieYear(b) - this.movieYear(a));
-      } else if (this.sortBy === 'oldest') {
-        movies.sort((a, b) => (this.movieYear(a) || 9999) - (this.movieYear(b) || 9999));
-      } else if (this.sortBy === 'name') {
-        movies.sort((a, b) => a.name.localeCompare(b.name));
-      }
+      if (this.ratingFilter) movies = movies.filter(movie => this.movieRating(movie) >= this.ratingFilter);
+      if (this.sortBy === 'rating') movies.sort((a, b) => this.movieRating(b) - this.movieRating(a));
+      if (this.sortBy === 'newest') movies.sort((a, b) => this.movieYear(b) - this.movieYear(a));
+      if (this.sortBy === 'oldest') movies.sort((a, b) => (this.movieYear(a) || 9999) - (this.movieYear(b) || 9999));
+      if (this.sortBy === 'name') movies.sort((a, b) => a.name.localeCompare(b.name));
       return movies;
-    }
-  },
-  watch: {
-    searchQuery() {
-      clearTimeout(this.searchTimer);
-      if (this.view === 'explore') {
-        this.searchTimer = setTimeout(() => this.fetchMovies(false), 420);
-      }
     },
-    activeFilm(value) {
-      document.body.classList.toggle('modal-open', !!value);
-      if (value) this.$nextTick(() => this.$refs.movieDialog?.focus());
-    }
-  },
-  mounted() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-      this.favorites = Array.isArray(saved) ? saved.filter(movie => movie && movie.id && movie.name) : [];
-    } catch {
-      this.favorites = [];
-    }
-    this.fetchMovies(false);
-    window.addEventListener('keydown', this.handleKeydown);
-  },
-  beforeUnmount() {
-    window.removeEventListener('keydown', this.handleKeydown);
-    document.body.classList.remove('modal-open');
-    clearTimeout(this.searchTimer);
-    this.controller?.abort();
-  },
-  methods: {
+    cancelCatalog() {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+      this.requestId++;
+      this.controller?.abort();
+      this.controller = null;
+    },
+    scheduleFetch() {
+      if (this.view !== 'explore' || this.suspendFetch) return;
+      this.cancelCatalog();
+      this.items = [];
+      this.error = '';
+      this.hasMore = true;
+      this.page = -1;
+      this.loading = true;
+      this.loadingMore = false;
+      this.searchTimer = setTimeout(() => this.fetchMovies(false), 320);
+    },
+    catalogUrl(page) {
+      const query = this.searchQuery.trim();
+      const extra = query.length >= 2 ? 'search=' + encodeURIComponent(query) : this.selectedGenre ? 'genre=' + encodeURIComponent(this.selectedGenre) : '';
+      const parts = [];
+      if (extra) parts.push(extra);
+      if (page) parts.push('skip=' + page * PAGE_SIZE);
+      return API_BASE + '/catalog/movie/top' + (parts.length ? '/' + parts.join('&') : '') + '.json';
+    },
     async fetchMovies(more = false) {
-      if (this.view !== 'explore' || (more && (this.loading || this.loadingMore))) return;
+      if (this.view !== 'explore' || (more && (this.loading || this.loadingMore || !this.hasMore))) return;
+      clearTimeout(this.searchTimer);
       const request = ++this.requestId;
       this.controller?.abort();
       this.controller = new AbortController();
-      this.error = '';
+      const controller = this.controller;
+      let timeout = setTimeout(() => controller.abort(), 16000);
       if (more) this.loadingMore = true;
       else {
         this.loading = true;
         this.items = [];
-        this.page = 0;
-        this.hasMore = false;
+        this.page = -1;
+        this.hasMore = true;
       }
-      const nextPage = more ? this.page + 1 : 0;
-      const search = this.searchQuery.trim();
-      const extra = search.length >= 2
-        ? 'search=' + encodeURIComponent(search)
-        : this.selectedGenre
-          ? 'genre=' + encodeURIComponent(this.selectedGenre)
-          : '';
-      const pieces = [];
-      if (extra) pieces.push(extra);
-      if (nextPage) pieces.push('skip=' + nextPage * PAGE_SIZE);
-      const url = API_BASE + '/catalog/movie/top' + (pieces.length ? '/' + pieces.join('&') : '') + '.json';
-
+      this.error = '';
       try {
-        const response = await fetch(url, { signal: this.controller.signal });
-        if (!response.ok) throw new Error('HTTP ' + response.status);
-        const payload = await response.json();
-        if (!Array.isArray(payload.metas)) throw new Error('Resposta invalida');
-        if (request !== this.requestId) return;
-        const incoming = payload.metas.filter(movie => movie && movie.id && movie.name && (!movie.type || movie.type === 'movie'));
-        const known = new Set(more ? this.items.map(movie => movie.id) : []);
-        const fresh = incoming.filter(movie => !known.has(movie.id) && known.add(movie.id));
-        this.items = more ? [...this.items, ...fresh] : fresh;
-        this.page = nextPage;
-        this.hasMore = payload.metas.length >= PAGE_SIZE && fresh.length > 0;
+        const known = new Set(this.items.map(movie => movie.id));
+        let scanned = 0;
+        do {
+          const nextPage = this.page + 1;
+          const response = await fetch(this.catalogUrl(nextPage), { signal: controller.signal });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          const payload = await response.json();
+          if (!payload || !Array.isArray(payload.metas)) throw new Error('Resposta invalida');
+          if (request !== this.requestId) return;
+          const fresh = [];
+          for (const source of payload.metas) {
+            const movie = this.normalizeMovie(source);
+            if (!movie || known.has(movie.id)) continue;
+            known.add(movie.id);
+            fresh.push(movie);
+          }
+          this.items.push(...fresh);
+          this.page = nextPage;
+          this.hasMore = payload.metas.length >= PAGE_SIZE && fresh.length > 0;
+          scanned++;
+        } while (this.hasMore && this.localFilterActive && this.filteredMovies(this.items).length < MIN_VISIBLE && scanned < MAX_PAGES_PER_LOAD);
       } catch (error) {
-        if (request !== this.requestId || error.name === 'AbortError') return;
-        this.error = error.message.includes('429')
-          ? 'O servico esta ocupado. Tenta novamente daqui a pouco.'
-          : 'Verifica a ligacao a internet e volta a tentar.';
+        if (request !== this.requestId) return;
+        if (error.name === 'AbortError' && controller.signal.aborted) {
+          this.error = 'A consulta demorou demasiado tempo. Tenta novamente.';
+        } else {
+          this.error = String(error.message).includes('429')
+            ? 'O servico esta temporariamente ocupado. Tenta novamente.'
+            : 'Nao foi possivel consultar os filmes. Verifica a ligacao e tenta novamente.';
+        }
       } finally {
+        clearTimeout(timeout);
         if (request === this.requestId) {
           this.loading = false;
           this.loadingMore = false;
@@ -160,14 +244,22 @@ const app = Vue.createApp({
       }
     },
     selectGenre(value) {
-      if (this.selectedGenre === value) return;
       this.selectedGenre = value;
-      if (this.view === 'explore') this.fetchMovies(false);
+    },
+    resetFilters() {
+      if (this.view === 'favorites' && !this.favorites.length) {
+        this.showExplore();
+        return;
+      }
+      this.searchQuery = '';
+      this.selectedGenre = '';
+      this.yearFilter = 'all';
+      this.ratingFilter = 0;
+      this.sortBy = 'featured';
     },
     showFavorites() {
+      this.cancelCatalog();
       this.view = 'favorites';
-      this.controller?.abort();
-      this.requestId++;
       this.loading = false;
       this.loadingMore = false;
       this.error = '';
@@ -179,15 +271,23 @@ const app = Vue.createApp({
       this.scrollToCatalog();
     },
     showExplore() {
-      const wasFavorites = this.view === 'favorites';
-      this.view = 'explore';
+      const fromFavorites = this.view === 'favorites';
+      if (fromFavorites) this.suspendFetch = true;
       this.searchQuery = '';
       this.selectedGenre = '';
       this.yearFilter = 'all';
       this.ratingFilter = 0;
       this.sortBy = 'featured';
-      if (wasFavorites && !this.items.length) this.fetchMovies(false);
-      this.scrollToCatalog();
+      this.view = 'explore';
+      if (fromFavorites) {
+        this.$nextTick(() => {
+          this.suspendFetch = false;
+          this.fetchMovies();
+          this.scrollToCatalog();
+        });
+      } else {
+        this.scrollToCatalog();
+      }
     },
     goHome() {
       this.showExplore();
@@ -195,30 +295,6 @@ const app = Vue.createApp({
     },
     scrollToCatalog() {
       this.$nextTick(() => document.getElementById('catalogo')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-    },
-    resetFilters() {
-      this.yearFilter = 'all';
-      this.ratingFilter = 0;
-      this.sortBy = 'featured';
-      if (this.view === 'favorites' && !this.favorites.length) {
-        this.showExplore();
-      } else {
-        this.searchQuery = '';
-        this.selectGenre('');
-      }
-    },
-    movieYear(movie) {
-      const match = String(movie.releaseInfo || movie.year || '').match(/(?:18|19|20)\d{2}/);
-      return match ? Number(match[0]) : 0;
-    },
-    movieRating(movie) {
-      const rating = Number.parseFloat(String(movie.imdbRating || '').replace(',', '.'));
-      return Number.isFinite(rating) && rating > 0 ? rating : 0;
-    },
-    genreLabel(movie) {
-      const genre = (movie.genres || [])[0];
-      const found = this.genres.find(item => item.value.toLowerCase() === String(genre || '').toLowerCase());
-      return found ? found.label : genre || 'Cinema';
     },
     isFavorite(id) {
       return this.favorites.some(movie => movie.id === id);
@@ -228,7 +304,9 @@ const app = Vue.createApp({
         this.favorites = this.favorites.filter(item => item.id !== movie.id);
         this.announcement = movie.name + ' removido da tua lista.';
       } else {
-        this.favorites.unshift({ ...movie });
+        const clean = this.normalizeMovie(movie);
+        if (!clean) return;
+        this.favorites.unshift(clean);
         this.announcement = movie.name + ' guardado na tua lista.';
       }
       try {
@@ -237,61 +315,72 @@ const app = Vue.createApp({
         this.announcement = 'Nao foi possivel guardar a lista neste navegador.';
       }
     },
+    cancelDetails() {
+      this.detailRequestId++;
+      this.detailController?.abort();
+      this.detailController = null;
+    },
     async openMovie(movie) {
+      this.cancelDetails();
+      const request = this.detailRequestId;
       this.previousFocus = document.activeElement;
       this.activeFilm = { ...movie };
       this.detailsLoading = true;
+      const controller = new AbortController();
+      this.detailController = controller;
+      const timeout = setTimeout(() => controller.abort(), 12000);
       try {
-        const response = await fetch(API_BASE + '/meta/movie/' + encodeURIComponent(movie.id) + '.json');
+        const response = await fetch(API_BASE + '/meta/movie/' + encodeURIComponent(movie.id) + '.json', { signal: controller.signal });
         if (!response.ok) throw new Error('Detalhe indisponivel');
         const payload = await response.json();
-        if (this.activeFilm && this.activeFilm.id === movie.id && payload.meta) {
-          this.activeFilm = { ...movie, ...payload.meta };
+        if (request === this.detailRequestId && payload.meta && this.activeFilm?.id === movie.id) {
+          this.activeFilm = { ...movie, ...this.normalizeMovie({ ...movie, ...payload.meta }) };
         }
       } catch {
-        this.announcement = 'A mostrar os dados disponiveis deste filme.';
+        if (request === this.detailRequestId) this.announcement = 'A mostrar os dados disponiveis para este filme.';
       } finally {
-        if (this.activeFilm && this.activeFilm.id === movie.id) this.detailsLoading = false;
+        clearTimeout(timeout);
+        if (request === this.detailRequestId) this.detailsLoading = false;
       }
     },
     closeMovie() {
+      this.cancelDetails();
       this.activeFilm = null;
       this.detailsLoading = false;
       this.$nextTick(() => this.previousFocus?.focus?.());
     },
-    formatPeople(people) {
-      if (Array.isArray(people)) return people.join(', ');
-      return String(people || '');
+    formatPeople(value) {
+      return Array.isArray(value) ? value.join(', ') : String(value || '');
     },
     imdbLink(movie) {
       return /^tt\d+$/.test(movie.id || '') ? 'https://www.imdb.com/title/' + movie.id + '/' : '';
     },
     surpriseMe() {
-      const selection = this.visibleFilms.length ? this.visibleFilms : this.items;
-      if (selection.length) this.openMovie(selection[Math.floor(Math.random() * selection.length)]);
+      const candidates = this.visibleFilms.length ? this.visibleFilms : this.items;
+      if (candidates.length) this.openMovie(candidates[Math.floor(Math.random() * candidates.length)]);
       else this.scrollToCatalog();
     },
     hideImage(event) {
       event.target.style.display = 'none';
     },
     handleKeydown(event) {
-      if (event.key === 'Tab' && this.activeFilm && this.$refs.movieDialog) {
-        const controls = [...this.$refs.movieDialog.querySelectorAll('button:not([disabled]), a[href]')];
-        if (controls.length) {
-          const first = controls[0];
-          const last = controls[controls.length - 1];
-          if (event.shiftKey && (document.activeElement === first || document.activeElement === this.$refs.movieDialog)) {
-            event.preventDefault();
-            last.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-          }
-        }
-      }
-      if (event.key === 'Escape' && this.activeFilm) {
+      if (this.activeFilm && event.key === 'Escape') {
+        event.preventDefault();
         this.closeMovie();
         return;
+      }
+      if (this.activeFilm && event.key === 'Tab' && this.$refs.movieDialog) {
+        const controls = [...this.$refs.movieDialog.querySelectorAll('button:not([disabled]), a[href]')];
+        if (!controls.length) return;
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === this.$refs.movieDialog)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (document.activeElement === last || !this.$refs.movieDialog.contains(document.activeElement))) {
+          event.preventDefault();
+          first.focus();
+        }
       }
       if (event.key === '/' && !this.activeFilm && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
         event.preventDefault();
