@@ -141,7 +141,7 @@ const app = Vue.createApp({
         const payload = await response.json();
         if (!Array.isArray(payload.metas)) throw new Error('Resposta invalida');
         if (request !== this.requestId) return;
-        const incoming = payload.metas.filter(movie => movie && movie.id && movie.name && movie.type === 'movie');
+        const incoming = payload.metas.filter(movie => movie && movie.id && movie.name && (!movie.type || movie.type === 'movie'));
         const known = new Set(more ? this.items.map(movie => movie.id) : []);
         const fresh = incoming.filter(movie => !known.has(movie.id) && known.add(movie.id));
         this.items = more ? [...this.items, ...fresh] : fresh;
