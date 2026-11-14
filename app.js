@@ -1,9 +1,7 @@
-const API_BASE = 'https://v3-cinemeta.strem.io';
-const PAGE_SIZE = 100;
 const STORAGE_KEY = 'cineatlas_favoritos_v2';
 const OLD_STORAGE_KEY = 'cineatlas_favoritos_v1';
-const MIN_VISIBLE = 12;
-const MAX_PAGES_PER_LOAD = 3;
+const VISIBLE_TARGET = 16;
+const MAX_REQUESTS_PER_BATCH = 5;
 
 const app = Vue.createApp({
   data() {
@@ -16,14 +14,16 @@ const app = Vue.createApp({
       yearFilter: 'all',
       ratingFilter: 0,
       sortBy: 'featured',
-      page: -1,
-      hasMore: true,
       loading: true,
       loadingMore: false,
-      detailsLoading: false,
+      hasMore: true,
       error: '',
+      detailError: '',
+      detailsLoading: false,
       activeFilm: null,
       announcement: '',
+      plan: null,
+      cursor: CinemaCatalog.initialCursor(),
       requestId: 0,
       detailRequestId: 0,
       controller: null,
@@ -50,17 +50,29 @@ const app = Vue.createApp({
     featuredFilm() {
       return this.items.find(movie => this.safeImage(movie.poster)) || null;
     },
+    pendingSearch() {
+      return this.view === 'explore' && this.searchQuery.trim().length === 1;
+    },
     localFilterActive() {
-      return this.yearFilter !== 'all' || this.ratingFilter > 0 || (this.selectedGenre && this.searchQuery.trim().length >= 2);
+      return this.yearFilter !== 'all' || this.ratingFilter > 0 || Boolean(this.selectedGenre);
     },
     visibleFilms() {
-      return this.filteredMovies(this.view === 'favorites' ? this.favorites : this.items);
+      return this.filterMovies(this.view === 'favorites' ? this.favorites : this.items);
     },
     resultsLabel() {
       if (this.view === 'favorites') return 'A minha lista';
-      if (this.searchQuery.trim()) return 'Resultados da pesquisa';
+      if (this.searchQuery.trim().length >= 2) return 'Resultados da pesquisa';
       if (this.selectedGenre) return 'Filmes por genero';
       return 'Filmes em destaque';
+    },
+    partialNotice() {
+      if (this.view !== 'explore' || this.loading || this.pendingSearch || !this.hasMore) return '';
+      if (this.sortBy === 'name') return 'A ordem alfabetica considera os filmes ja consultados. Carrega mais para alargar a lista.';
+      if (this.searchQuery.trim().length >= 2 && (this.yearFilter !== 'all' || this.ratingFilter)) {
+        return 'O ano e a avaliacao sao filtrados dentro dos resultados da pesquisa. Podes procurar nas paginas seguintes.';
+      }
+      if (this.localFilterActive) return 'A mostrar os resultados encontrados ate agora. Podes continuar a pesquisa para encontrar mais filmes.';
+      return 'A mostrar parte do catalogo. Carrega mais para ver outros filmes.';
     }
   },
   watch: {
@@ -74,6 +86,9 @@ const app = Vue.createApp({
       this.scheduleFetch();
     },
     ratingFilter() {
+      this.scheduleFetch();
+    },
+    sortBy() {
       this.scheduleFetch();
     },
     activeFilm(film) {
@@ -105,24 +120,23 @@ const app = Vue.createApp({
     window.removeEventListener('keydown', this.handleKeydown);
   },
   methods: {
+    safeImage(url) {
+      return typeof url === 'string' && /^https:\/\/[^\s]+$/i.test(url) ? url : '';
+    },
     normalizeMovie(movie) {
       if (!movie || !/^tt\d+$/.test(String(movie.id || '')) || typeof movie.name !== 'string' || !movie.name.trim()) return null;
       return {
         id: movie.id,
         name: movie.name.trim(),
-        type: 'movie',
         poster: this.safeImage(movie.poster),
         releaseInfo: String(movie.releaseInfo || movie.year || ''),
         imdbRating: movie.imdbRating || '',
-        genres: Array.isArray(movie.genres) ? movie.genres.filter(value => typeof value === 'string').slice(0, 10) : [],
+        genres: Array.isArray(movie.genres) ? movie.genres.filter(item => typeof item === 'string').slice(0, 10) : [],
         description: typeof movie.description === 'string' ? movie.description : '',
         runtime: typeof movie.runtime === 'string' ? movie.runtime : '',
         director: Array.isArray(movie.director) || typeof movie.director === 'string' ? movie.director : '',
-        cast: Array.isArray(movie.cast) ? movie.cast.filter(value => typeof value === 'string').slice(0, 12) : []
+        cast: Array.isArray(movie.cast) ? movie.cast.filter(item => typeof item === 'string').slice(0, 12) : []
       };
-    },
-    safeImage(url) {
-      return typeof url === 'string' && /^https:\/\/[^\s]+$/i.test(url) ? url : '';
     },
     movieYear(movie) {
       const match = String(movie.releaseInfo || '').match(/(?:18|19|20)\d{2}/);
@@ -134,16 +148,16 @@ const app = Vue.createApp({
     },
     genreLabel(movie) {
       const genre = (movie.genres || [])[0] || '';
-      const match = this.genres.find(item => item.value.toLowerCase() === genre.toLowerCase());
-      return match ? match.label : genre || 'Cinema';
+      const found = this.genres.find(item => item.value.toLowerCase() === genre.toLowerCase());
+      return found ? found.label : genre || 'Cinema';
     },
-    filteredMovies(source) {
+    filterMovies(source) {
       let movies = [...source];
       const query = this.searchQuery.trim().toLocaleLowerCase();
-      if (query && (this.view === 'favorites' || query.length < 2)) {
+      if (this.view === 'favorites' && query) {
         movies = movies.filter(movie => movie.name.toLocaleLowerCase().includes(query));
       }
-      if (this.selectedGenre && (this.view === 'favorites' || query.length >= 2)) {
+      if (this.selectedGenre) {
         movies = movies.filter(movie => movie.genres.some(genre => genre.toLowerCase() === this.selectedGenre.toLowerCase()));
       }
       if (this.yearFilter !== 'all') {
@@ -174,46 +188,63 @@ const app = Vue.createApp({
       this.cancelCatalog();
       this.items = [];
       this.error = '';
+      this.cursor = CinemaCatalog.initialCursor();
       this.hasMore = true;
-      this.page = -1;
-      this.loading = true;
       this.loadingMore = false;
-      this.searchTimer = setTimeout(() => this.fetchMovies(false), 320);
-    },
-    catalogUrl(page) {
-      const query = this.searchQuery.trim();
-      const extra = query.length >= 2 ? 'search=' + encodeURIComponent(query) : this.selectedGenre ? 'genre=' + encodeURIComponent(this.selectedGenre) : '';
-      const parts = [];
-      if (extra) parts.push(extra);
-      if (page) parts.push('skip=' + page * PAGE_SIZE);
-      return API_BASE + '/catalog/movie/top' + (parts.length ? '/' + parts.join('&') : '') + '.json';
+      if (this.pendingSearch) {
+        this.hasMore = false;
+        this.loading = false;
+        return;
+      }
+      this.loading = true;
+      this.searchTimer = setTimeout(() => this.fetchMovies(), 320);
     },
     async fetchMovies(more = false) {
-      if (this.view !== 'explore' || (more && (this.loading || this.loadingMore || !this.hasMore))) return;
+      if (this.view !== 'explore' || this.pendingSearch) return;
+      if (more && (this.loading || this.loadingMore || !this.hasMore)) return;
+
       clearTimeout(this.searchTimer);
       const request = ++this.requestId;
       this.controller?.abort();
-      this.controller = new AbortController();
-      const controller = this.controller;
-      let timeout = setTimeout(() => controller.abort(), 16000);
-      if (more) this.loadingMore = true;
-      else {
+      const controller = new AbortController();
+      this.controller = controller;
+      const timeout = setTimeout(() => controller.abort(), 16000);
+
+      if (more) {
+        this.loadingMore = true;
+      } else {
         this.loading = true;
         this.items = [];
-        this.page = -1;
+        this.cursor = CinemaCatalog.initialCursor();
+        this.plan = CinemaCatalog.createPlan({
+          search: this.searchQuery,
+          genre: this.selectedGenre,
+          year: this.yearFilter,
+          rating: this.ratingFilter,
+          sort: this.sortBy
+        });
         this.hasMore = true;
       }
       this.error = '';
+
       try {
         const known = new Set(this.items.map(movie => movie.id));
         let scanned = 0;
-        do {
-          const nextPage = this.page + 1;
-          const response = await fetch(this.catalogUrl(nextPage), { signal: controller.signal });
+        const scanLimit = this.localFilterActive ? MAX_REQUESTS_PER_BATCH : 1;
+
+        while (this.hasMore && scanned < scanLimit) {
+          const url = CinemaCatalog.requestUrl(this.plan, this.cursor);
+          if (!url) {
+            this.hasMore = false;
+            break;
+          }
+
+          const response = await fetch(url, { signal: controller.signal });
           if (!response.ok) throw new Error('HTTP ' + response.status);
           const payload = await response.json();
           if (!payload || !Array.isArray(payload.metas)) throw new Error('Resposta invalida');
           if (request !== this.requestId) return;
+
           const fresh = [];
           for (const source of payload.metas) {
             const movie = this.normalizeMovie(source);
@@ -221,11 +252,15 @@ const app = Vue.createApp({
             known.add(movie.id);
             fresh.push(movie);
           }
+
           this.items.push(...fresh);
-          this.page = nextPage;
-          this.hasMore = payload.metas.length >= PAGE_SIZE && fresh.length > 0;
+          const count = payload.metas.length;
+          this.cursor = CinemaCatalog.nextCursor(this.plan, this.cursor, count);
+          this.hasMore = CinemaCatalog.moreAvailable(this.plan, this.cursor, count);
           scanned++;
-        } while (this.hasMore && this.localFilterActive && this.filteredMovies(this.items).length < MIN_VISIBLE && scanned < MAX_PAGES_PER_LOAD);
+
+          if (this.filterMovies(this.items).length >= VISIBLE_TARGET) break;
+        }
       } catch (error) {
         if (request !== this.requestId) return;
         if (error.name === 'AbortError' && controller.signal.aborted) {
@@ -243,22 +278,22 @@ const app = Vue.createApp({
         }
       }
     },
-    selectGenre(value) {
-      this.selectedGenre = value;
-    },
     resetFilters() {
       if (this.view === 'favorites' && !this.favorites.length) {
         this.showExplore();
         return;
       }
+      const alreadyClear = !this.searchQuery && !this.selectedGenre && this.yearFilter === 'all' && !this.ratingFilter && this.sortBy === 'featured';
       this.searchQuery = '';
       this.selectedGenre = '';
       this.yearFilter = 'all';
       this.ratingFilter = 0;
       this.sortBy = 'featured';
+      if (alreadyClear && this.view === 'explore') this.fetchMovies();
     },
     showFavorites() {
       this.cancelCatalog();
+      this.suspendFetch = true;
       this.view = 'favorites';
       this.loading = false;
       this.loadingMore = false;
@@ -268,6 +303,7 @@ const app = Vue.createApp({
       this.yearFilter = 'all';
       this.ratingFilter = 0;
       this.sortBy = 'featured';
+      this.$nextTick(() => { this.suspendFetch = false; });
       this.scrollToCatalog();
     },
     showExplore() {
@@ -325,19 +361,23 @@ const app = Vue.createApp({
       const request = this.detailRequestId;
       this.previousFocus = document.activeElement;
       this.activeFilm = { ...movie };
+      this.detailError = '';
       this.detailsLoading = true;
       const controller = new AbortController();
       this.detailController = controller;
       const timeout = setTimeout(() => controller.abort(), 12000);
       try {
-        const response = await fetch(API_BASE + '/meta/movie/' + encodeURIComponent(movie.id) + '.json', { signal: controller.signal });
+        const response = await fetch('https://v3-cinemeta.strem.io/meta/movie/' + encodeURIComponent(movie.id) + '.json', { signal: controller.signal });
         if (!response.ok) throw new Error('Detalhe indisponivel');
         const payload = await response.json();
-        if (request === this.detailRequestId && payload.meta && this.activeFilm?.id === movie.id) {
-          this.activeFilm = { ...movie, ...this.normalizeMovie({ ...movie, ...payload.meta }) };
-        }
+        if (request !== this.detailRequestId) return;
+        const extra = this.normalizeMovie({ ...movie, ...(payload.meta || {}) });
+        if (!extra) throw new Error('Detalhe invalido');
+        if (this.activeFilm?.id === movie.id) this.activeFilm = extra;
       } catch {
-        if (request === this.detailRequestId) this.announcement = 'A mostrar os dados disponiveis para este filme.';
+        if (request === this.detailRequestId) {
+          this.detailError = 'Nao foi possivel consultar todos os detalhes. Estao apresentados os dados disponiveis.';
+        }
       } finally {
         clearTimeout(timeout);
         if (request === this.detailRequestId) this.detailsLoading = false;
@@ -346,6 +386,7 @@ const app = Vue.createApp({
     closeMovie() {
       this.cancelDetails();
       this.activeFilm = null;
+      this.detailError = '';
       this.detailsLoading = false;
       this.$nextTick(() => this.previousFocus?.focus?.());
     },
