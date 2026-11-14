@@ -3,6 +3,7 @@ const OLD_STORAGE_KEY = 'cineatlas_favoritos_v1';
 const PAGE_INCREMENT = 16;
 const MAX_REQUESTS_PER_BATCH = 5;
 const BATCH_DEADLINE_MS = 19000;
+const MAX_AUTO_EMPTY_REQUESTS = 25;
 
 const app = Vue.createApp({
   data() {
@@ -31,6 +32,9 @@ const app = Vue.createApp({
       controller: null,
       detailController: null,
       searchTimer: null,
+      autoScanTimer: null,
+      autoScanCount: 0,
+      lastSurpriseId: null,
       previousFocus: null,
       suspendFetch: false,
       genres: [
@@ -75,7 +79,13 @@ const app = Vue.createApp({
     },
     partialNotice() {
       if (this.view !== 'explore' || this.loading || this.pendingSearch || !this.hasMore) return '';
-      if (this.sortBy === 'name' || this.sortBy === 'rating' || this.sortBy === 'newest' || this.sortBy === 'oldest') return 'A ordenacao considera os filmes ja carregados. Continua a pesquisa para ver mais titulos.';
+      if (this.plan?.mode === 'year' && !this.filteredFilms.length && this.autoScanCount >= MAX_AUTO_EMPTY_REQUESTS) {
+        return 'A pesquisa fez uma pausa apos consultar varios anos. Podes continuar a procurar nos anos seguintes.';
+      }
+      if (['name', 'rating', 'newest', 'oldest'].includes(this.sortBy)) {
+        const total = this.filteredFilms.length;
+        return 'Ordenacao aplicada aos ' + total + ' filmes encontrados ate agora. Existem mais paginas por consultar e a ordem pode mudar ao carregar mais.';
+      }
       if (this.searchQuery.trim().length >= 2 && (this.yearFilter !== 'all' || this.ratingFilter)) {
         return 'O ano e a avaliacao sao filtrados dentro dos resultados da pesquisa. Podes procurar nas paginas seguintes.';
       }
@@ -186,7 +196,9 @@ const app = Vue.createApp({
     },
     cancelCatalog() {
       clearTimeout(this.searchTimer);
+      clearTimeout(this.autoScanTimer);
       this.searchTimer = null;
+      this.autoScanTimer = null;
       this.requestId++;
       this.controller?.abort();
       this.controller = null;
@@ -198,6 +210,7 @@ const app = Vue.createApp({
       this.visibleCount = PAGE_INCREMENT;
       this.error = '';
       this.cursor = CinemaCatalog.initialCursor();
+      this.autoScanCount = 0;
       this.hasMore = true;
       this.loadingMore = false;
       if (this.pendingSearch) {
@@ -208,9 +221,9 @@ const app = Vue.createApp({
       this.loading = true;
       this.searchTimer = setTimeout(() => this.fetchMovies(), 320);
     },
-    async fetchMovies(more = false) {
+    async fetchMovies(more = false, automatic = false) {
       if (this.view !== 'explore' || this.pendingSearch) return;
-      if (more && (this.loading || this.loadingMore || !this.hasMore)) return;
+      if (more && (this.loadingMore || (this.loading && !automatic) || !this.hasMore)) return;
 
       clearTimeout(this.searchTimer);
       const request = ++this.requestId;
@@ -227,6 +240,7 @@ const app = Vue.createApp({
         this.visibleCount = PAGE_INCREMENT;
         this.items = [];
         this.cursor = CinemaCatalog.initialCursor();
+        this.autoScanCount = 0;
         this.plan = CinemaCatalog.createPlan({
           search: this.searchQuery,
           genre: this.selectedGenre,
@@ -241,7 +255,7 @@ const app = Vue.createApp({
       try {
         const known = new Set(this.items.map(movie => movie.id));
         let scanned = 0;
-        const scanLimit = this.localFilterActive ? MAX_REQUESTS_PER_BATCH : 1;
+        const scanLimit = this.localFilterActive || this.plan.mode === 'year' ? MAX_REQUESTS_PER_BATCH : 1;
 
         while (this.hasMore && scanned < scanLimit) {
           const url = CinemaCatalog.requestUrl(this.plan, this.cursor);
@@ -266,6 +280,7 @@ const app = Vue.createApp({
           this.cursor = CinemaCatalog.nextCursor(this.plan, this.cursor, count);
           this.hasMore = CinemaCatalog.moreAvailable(this.plan, this.cursor, count);
           scanned++;
+          if (this.plan.mode === 'year') this.autoScanCount++;
 
           if (this.filterMovies(this.items).length >= this.visibleCount) break;
         }
@@ -283,8 +298,17 @@ const app = Vue.createApp({
         }
       } finally {
         if (request === this.requestId) {
-          this.loading = false;
+          const searchingYears = !this.error && this.plan?.mode === 'year' &&
+            !this.filterMovies(this.items).length && this.hasMore &&
+            this.autoScanCount < MAX_AUTO_EMPTY_REQUESTS;
+          this.loading = searchingYears;
           this.loadingMore = false;
+          if (searchingYears) {
+            this.autoScanTimer = setTimeout(() => {
+              this.autoScanTimer = null;
+              if (request === this.requestId && this.view === 'explore') this.fetchMovies(true, true);
+            }, 100);
+          }
         }
       }
     },
@@ -412,9 +436,13 @@ const app = Vue.createApp({
       return /^tt\d+$/.test(movie.id || '') ? 'https://www.imdb.com/title/' + movie.id + '/' : '';
     },
     surpriseMe() {
-      const candidates = this.visibleFilms;
-      if (candidates.length) this.openMovie(candidates[Math.floor(Math.random() * candidates.length)]);
-      else {
+      const candidates = this.filteredFilms;
+      if (candidates.length) {
+        const pool = candidates.length > 1 ? candidates.filter(movie => movie.id !== this.lastSurpriseId) : candidates;
+        const chosen = pool[Math.floor(Math.random() * pool.length)];
+        this.lastSurpriseId = chosen.id;
+        this.openMovie(chosen);
+      } else {
         this.announcement = 'Nao existem filmes nesta selecao.';
         this.scrollToCatalog();
       }
