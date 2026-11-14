@@ -149,7 +149,7 @@
           </div>
           <div v-else-if="!visibleFilms.length" class="empty-state">
             <div class="empty-icon">&#9671;</div>
-            <h3>{{ view === 'favorites' && !favorites.length ? 'A tua lista ainda esta vazia' : 'Nenhum filme nesta selecao' }}</h3>
+            <h3>{{ view === 'favorites' && !favorites.length ? 'A tua lista ainda esta vazia' : hasMore && view === 'explore' ? 'Ainda sem resultados nesta selecao' : 'Nenhum filme nesta selecao' }}</h3>
             <p>{{ view === 'favorites' && !favorites.length ? 'Guarda os teus filmes preferidos para os encontrares aqui.' : hasMore && view === 'explore' ? 'Ainda nao foram encontrados filmes com estes filtros. Continua a procurar nas paginas seguintes.' : 'Experimenta outra pesquisa ou remove alguns filtros.' }}</p>
             <button type="button" class="btn btn-dark" @click="resetFilters">{{ view === 'favorites' && !favorites.length ? 'Explorar filmes' : 'Limpar filtros' }}</button>
           </div>
