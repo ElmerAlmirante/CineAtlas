@@ -9,9 +9,7 @@
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="preconnect" href="https://v3-cinemeta.strem.io">
   <link rel="stylesheet" href="styles.css">
-  <script defer src="vue.js"></script>
-  <script defer src="catalog.js"></script>
-  <script defer src="app.js"></script>
+  <script defer src="boot.js"></script>
 </head>
 <body>
   <div id="app" v-cloak>
@@ -75,15 +73,16 @@
 
           <div class="filters-panel">
             <div class="filters-top">
-              <label class="search-field" for="movie-search">
+              <div class="search-field" role="search">
+                <label class="sr-only" for="movie-search">Pesquisar pelo titulo do filme</label>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                   <circle cx="10.7" cy="10.7" r="6.8"></circle>
                   <path d="m16 16 5 5"></path>
                 </svg>
                 <input id="movie-search" type="search" v-model="searchQuery" placeholder="Pesquisar pelo titulo do filme" autocomplete="off" aria-describedby="search-guidance">
-                <kbd v-if="!searchQuery">/</kbd>
+                <kbd v-if="!searchQuery" aria-hidden="true">/</kbd>
                 <button v-else type="button" class="clear-search" @click="searchQuery = ''" aria-label="Limpar pesquisa">&#215;</button>
-              </label>
+              </div>
               <label class="select-field">
                 <span>Ano</span>
                 <select v-model="yearFilter" aria-label="Filtrar por ano">
@@ -92,7 +91,7 @@
                   <option value="2010">2010 - 2019</option>
                   <option value="2000">2000 - 2009</option>
                   <option value="1990">1990 - 1999</option>
-                  <option value="classic">Antes de 1990</option>
+                  <option value="classic">1920 - 1989</option>
                 </select>
               </label>
               <label class="select-field">
@@ -133,7 +132,7 @@
             <h3>Continua a escrever</h3>
             <p>Introduz pelo menos duas letras para iniciar a pesquisa de filmes.</p>
           </div>
-          <div v-else-if="loading && view === 'explore'" class="films-grid" aria-label="A carregar filmes">
+          <div v-else-if="loading && view === 'explore'" class="films-grid" aria-label="A carregar filmes" aria-busy="true">
             <div v-for="n in 10" :key="n" class="movie-card">
               <div class="skeleton-poster"></div>
               <div class="skeleton-line"></div>
@@ -144,7 +143,7 @@
             <div class="empty-icon">!</div>
             <h3>Nao foi possivel carregar os filmes</h3>
             <p>{{ error }}</p>
-            <button type="button" class="btn btn-dark" @click="fetchMovies()">Tentar novamente</button>
+            <button type="button" class="btn btn-dark" @click="retryCatalog">Tentar novamente</button>
           </div>
           <div v-else-if="!visibleFilms.length" class="empty-state">
             <div class="empty-icon">&#9671;</div>
@@ -152,11 +151,11 @@
             <p>{{ view === 'favorites' && !favorites.length ? 'Guarda os teus filmes preferidos para os encontrares aqui.' : hasMore && view === 'explore' ? 'Ainda nao foram encontrados filmes com estes filtros. Continua a procurar nas paginas seguintes.' : 'Experimenta outra pesquisa ou remove alguns filtros.' }}</p>
             <button type="button" class="btn btn-dark" @click="resetFilters">{{ view === 'favorites' && !favorites.length ? 'Explorar filmes' : 'Limpar filtros' }}</button>
           </div>
-          <div v-else class="films-grid">
+          <div v-else class="films-grid" aria-label="Lista de filmes">
             <article v-for="movie in visibleFilms" :key="movie.id" class="movie-card">
               <button type="button" class="poster-button" @click="openMovie(movie)" :aria-label="'Ver detalhes de ' + movie.name">
                 <span class="poster-fallback"><strong>CA</strong><small>CINEATLAS</small></span>
-                <img v-if="safeImage(movie.poster)" :src="safeImage(movie.poster)" :alt="'Cartaz de ' + movie.name" loading="lazy" referrerpolicy="no-referrer" @error="hideImage">
+                <img v-if="safeImage(movie.poster)" :src="safeImage(movie.poster)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="hideImage">
                 <span class="poster-tint"></span>
                 <span class="poster-view">Ver detalhes &#8599;</span>
                 <span v-if="movieRating(movie)" class="poster-rating">&#9733; {{ movieRating(movie).toFixed(1) }}</span>
@@ -169,8 +168,8 @@
             </article>
           </div>
 
-          <p v-if="error && items.length && view === 'explore'" class="inline-error" role="alert">
-            {{ error }} <button type="button" @click="fetchMovies(true)">Voltar a tentar</button>
+          <p v-if="error && view === 'explore' && (items.length || (plan && hasMore)) && !loading" class="inline-error" role="alert">
+            {{ error }} <button type="button" @click="retryCatalog">Voltar a tentar</button>
           </p>
           <div v-if="view === 'explore' && hasMore && !loading && !error && !pendingSearch" class="load-more">
             <button type="button" class="btn btn-outline-dark" :disabled="loadingMore" @click="fetchMovies(true)">
@@ -195,7 +194,7 @@
         <button type="button" class="modal-close" @click="closeMovie" aria-label="Fechar detalhes">&#215;</button>
         <div class="modal-poster">
           <span class="modal-poster-fallback">CINEATLAS</span>
-          <img v-if="safeImage(activeFilm.poster)" :src="safeImage(activeFilm.poster)" :alt="'Cartaz de ' + activeFilm.name" referrerpolicy="no-referrer" @error="hideImage">
+          <img v-if="safeImage(activeFilm.poster)" :src="safeImage(activeFilm.poster)" alt="" referrerpolicy="no-referrer" @error="hideImage">
         </div>
         <div class="modal-content">
           <span class="modal-kicker">FICHA DO FILME</span>

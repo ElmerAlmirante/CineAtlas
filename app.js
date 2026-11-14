@@ -2,6 +2,7 @@ const STORAGE_KEY = 'cineatlas_favoritos_v2';
 const OLD_STORAGE_KEY = 'cineatlas_favoritos_v1';
 const VISIBLE_TARGET = 16;
 const MAX_REQUESTS_PER_BATCH = 5;
+const BATCH_DEADLINE_MS = 19000;
 
 const app = Vue.createApp({
   data() {
@@ -67,7 +68,7 @@ const app = Vue.createApp({
     },
     partialNotice() {
       if (this.view !== 'explore' || this.loading || this.pendingSearch || !this.hasMore) return '';
-      if (this.sortBy === 'name') return 'A ordem alfabetica considera os filmes ja consultados. Carrega mais para alargar a lista.';
+      if (this.sortBy === 'name') return 'A ordem alfabetica considera os filmes ja carregados. Continua a pesquisa para ver mais titulos.';
       if (this.searchQuery.trim().length >= 2 && (this.yearFilter !== 'all' || this.ratingFilter)) {
         return 'O ano e a avaliacao sao filtrados dentro dos resultados da pesquisa. Podes procurar nas paginas seguintes.';
       }
@@ -208,10 +209,11 @@ const app = Vue.createApp({
       this.controller?.abort();
       const controller = new AbortController();
       this.controller = controller;
-      const timeout = setTimeout(() => controller.abort(), 16000);
+      const deadline = Date.now() + BATCH_DEADLINE_MS;
 
       if (more) {
         this.loadingMore = true;
+        if (!this.items.length) this.loading = true;
       } else {
         this.loading = true;
         this.items = [];
@@ -239,10 +241,7 @@ const app = Vue.createApp({
             break;
           }
 
-          const response = await fetch(url, { signal: controller.signal });
-          if (!response.ok) throw new Error('HTTP ' + response.status);
-          const payload = await response.json();
-          if (!payload || !Array.isArray(payload.metas)) throw new Error('Resposta invalida');
+          const payload = await CinemaCatalog.read(url, controller.signal, { deadline });
           if (request !== this.requestId) return;
 
           const fresh = [];
@@ -263,20 +262,26 @@ const app = Vue.createApp({
         }
       } catch (error) {
         if (request !== this.requestId) return;
-        if (error.name === 'AbortError' && controller.signal.aborted) {
-          this.error = 'A consulta demorou demasiado tempo. Tenta novamente.';
+        if (error.code === 'CANCELLED') return;
+        if (error.code === 'TIMEOUT') {
+          this.error = 'A consulta demorou demasiado tempo. Podes continuar a partir da ultima pagina.';
+        } else if (error.code === 'RATE_LIMIT') {
+          this.error = 'O servico esta temporariamente ocupado. Tenta novamente.';
+        } else if (error.code === 'INVALID') {
+          this.error = 'O servico devolveu dados inesperados. Tenta novamente.';
         } else {
-          this.error = String(error.message).includes('429')
-            ? 'O servico esta temporariamente ocupado. Tenta novamente.'
-            : 'Nao foi possivel consultar os filmes. Verifica a ligacao e tenta novamente.';
+          this.error = 'Nao foi possivel consultar os filmes. Verifica a ligacao e tenta novamente.';
         }
       } finally {
-        clearTimeout(timeout);
         if (request === this.requestId) {
           this.loading = false;
           this.loadingMore = false;
         }
       }
+    },
+    retryCatalog() {
+      if (this.plan && this.hasMore) this.fetchMovies(true);
+      else this.fetchMovies();
     },
     resetFilters() {
       if (this.view === 'favorites' && !this.favorites.length) {
@@ -365,21 +370,17 @@ const app = Vue.createApp({
       this.detailsLoading = true;
       const controller = new AbortController();
       this.detailController = controller;
-      const timeout = setTimeout(() => controller.abort(), 12000);
       try {
-        const response = await fetch('https://v3-cinemeta.strem.io/meta/movie/' + encodeURIComponent(movie.id) + '.json', { signal: controller.signal });
-        if (!response.ok) throw new Error('Detalhe indisponivel');
-        const payload = await response.json();
+        const payload = await CinemaCatalog.read('https://v3-cinemeta.strem.io/meta/movie/' + encodeURIComponent(movie.id) + '.json', controller.signal, { kind: 'details', deadline: Date.now() + 14000 });
         if (request !== this.detailRequestId) return;
         const extra = this.normalizeMovie({ ...movie, ...(payload.meta || {}) });
         if (!extra) throw new Error('Detalhe invalido');
         if (this.activeFilm?.id === movie.id) this.activeFilm = extra;
-      } catch {
-        if (request === this.detailRequestId) {
+      } catch (error) {
+        if (request === this.detailRequestId && error.code !== 'CANCELLED') {
           this.detailError = 'Nao foi possivel consultar todos os detalhes. Estao apresentados os dados disponiveis.';
         }
       } finally {
-        clearTimeout(timeout);
         if (request === this.detailRequestId) this.detailsLoading = false;
       }
     },
@@ -397,9 +398,12 @@ const app = Vue.createApp({
       return /^tt\d+$/.test(movie.id || '') ? 'https://www.imdb.com/title/' + movie.id + '/' : '';
     },
     surpriseMe() {
-      const candidates = this.visibleFilms.length ? this.visibleFilms : this.items;
+      const candidates = this.visibleFilms;
       if (candidates.length) this.openMovie(candidates[Math.floor(Math.random() * candidates.length)]);
-      else this.scrollToCatalog();
+      else {
+        this.announcement = 'Nao existem filmes nesta selecao.';
+        this.scrollToCatalog();
+      }
     },
     hideImage(event) {
       event.target.style.display = 'none';
