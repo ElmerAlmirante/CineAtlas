@@ -23,7 +23,7 @@
   }
 
   async function start() {
-    const current = await loadScript('https://cdn.jsdelivr.net/npm/vue@3.5.45/dist/vue.global.prod.js', 2500);
+    const current = await loadScript('https://cdn.jsdelivr.net/npm/vue@3.5.45/dist/vue.global.prod.js', 900);
     if (!current || !window.Vue) await loadScript('vue-fallback.js');
 
     if (!window.Vue || !(await loadScript('catalog.js')) || !(await loadScript('app.js'))) {

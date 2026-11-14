@@ -8,6 +8,7 @@
   <title>CineAtlas | Descobre o proximo filme</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="preconnect" href="https://v3-cinemeta.strem.io">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <script defer src="boot.js"></script>
 </head>
@@ -113,7 +114,7 @@
           <div class="results-heading">
             <div class="results-title">
               <strong>{{ resultsLabel }}</strong>
-              <span v-if="!loading && !pendingSearch">{{ visibleFilms.length }} {{ visibleFilms.length === 1 ? 'filme encontrado' : 'filmes encontrados' }}</span>
+              <span v-if="!loading && !pendingSearch" aria-live="polite">{{ view === 'explore' && filteredFilms.length > visibleFilms.length ? 'A mostrar ' + visibleFilms.length + ' de ' + filteredFilms.length + ' filmes carregados' : visibleFilms.length + (visibleFilms.length === 1 ? ' filme encontrado' : ' filmes encontrados') }}</span>
             </div>
             <label class="sort-field">Ordenar
               <select v-model="sortBy" aria-label="Ordenar filmes">
@@ -151,11 +152,11 @@
             <p>{{ view === 'favorites' && !favorites.length ? 'Guarda os teus filmes preferidos para os encontrares aqui.' : hasMore && view === 'explore' ? 'Ainda nao foram encontrados filmes com estes filtros. Continua a procurar nas paginas seguintes.' : 'Experimenta outra pesquisa ou remove alguns filtros.' }}</p>
             <button type="button" class="btn btn-dark" @click="resetFilters">{{ view === 'favorites' && !favorites.length ? 'Explorar filmes' : 'Limpar filtros' }}</button>
           </div>
-          <div v-else class="films-grid" aria-label="Lista de filmes">
+          <div v-else class="films-grid" aria-label="Lista de filmes" :aria-busy="loadingMore">
             <article v-for="movie in visibleFilms" :key="movie.id" class="movie-card">
               <button type="button" class="poster-button" @click="openMovie(movie)" :aria-label="'Ver detalhes de ' + movie.name">
                 <span class="poster-fallback"><strong>CA</strong><small>CINEATLAS</small></span>
-                <img v-if="safeImage(movie.poster)" :src="safeImage(movie.poster)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="hideImage">
+                <img v-if="safeImage(movie.poster)" :src="safeImage(movie.poster)" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="hideImage">
                 <span class="poster-tint"></span>
                 <span class="poster-view">Ver detalhes &#8599;</span>
                 <span v-if="movieRating(movie)" class="poster-rating">&#9733; {{ movieRating(movie).toFixed(1) }}</span>
@@ -171,9 +172,9 @@
           <p v-if="error && view === 'explore' && (items.length || (plan && hasMore)) && !loading" class="inline-error" role="alert">
             {{ error }} <button type="button" @click="retryCatalog">Voltar a tentar</button>
           </p>
-          <div v-if="view === 'explore' && hasMore && !loading && !error && !pendingSearch" class="load-more">
-            <button type="button" class="btn btn-outline-dark" :disabled="loadingMore" @click="fetchMovies(true)">
-              {{ loadingMore ? 'A procurar filmes...' : localFilterActive ? 'Procurar em mais filmes' : 'Carregar mais filmes' }}
+          <div v-if="canLoadMore && !loading && !error && !pendingSearch" class="load-more">
+            <button type="button" class="btn btn-outline-dark" :disabled="loadingMore" @click="loadMore">
+              {{ loadingMore ? 'A procurar filmes...' : filteredFilms.length > visibleCount ? 'Mostrar mais filmes' : localFilterActive ? 'Procurar em mais filmes' : 'Carregar mais filmes' }}
               <span v-if="!loadingMore" aria-hidden="true">&#8595;</span>
             </button>
           </div>

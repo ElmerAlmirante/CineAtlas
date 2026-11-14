@@ -1,6 +1,6 @@
 const STORAGE_KEY = 'cineatlas_favoritos_v2';
 const OLD_STORAGE_KEY = 'cineatlas_favoritos_v1';
-const VISIBLE_TARGET = 16;
+const PAGE_INCREMENT = 16;
 const MAX_REQUESTS_PER_BATCH = 5;
 const BATCH_DEADLINE_MS = 19000;
 
@@ -8,6 +8,7 @@ const app = Vue.createApp({
   data() {
     return {
       items: [],
+      visibleCount: PAGE_INCREMENT,
       favorites: [],
       view: 'explore',
       searchQuery: '',
@@ -57,8 +58,14 @@ const app = Vue.createApp({
     localFilterActive() {
       return this.yearFilter !== 'all' || this.ratingFilter > 0 || Boolean(this.selectedGenre);
     },
-    visibleFilms() {
+    filteredFilms() {
       return this.filterMovies(this.view === 'favorites' ? this.favorites : this.items);
+    },
+    visibleFilms() {
+      return this.view === 'favorites' ? this.filteredFilms : this.filteredFilms.slice(0, this.visibleCount);
+    },
+    canLoadMore() {
+      return this.view === 'explore' && (this.filteredFilms.length > this.visibleCount || this.hasMore);
     },
     resultsLabel() {
       if (this.view === 'favorites') return 'A minha lista';
@@ -68,7 +75,7 @@ const app = Vue.createApp({
     },
     partialNotice() {
       if (this.view !== 'explore' || this.loading || this.pendingSearch || !this.hasMore) return '';
-      if (this.sortBy === 'name') return 'A ordem alfabetica considera os filmes ja carregados. Continua a pesquisa para ver mais titulos.';
+      if (this.sortBy === 'name' || this.sortBy === 'rating' || this.sortBy === 'newest' || this.sortBy === 'oldest') return 'A ordenacao considera os filmes ja carregados. Continua a pesquisa para ver mais titulos.';
       if (this.searchQuery.trim().length >= 2 && (this.yearFilter !== 'all' || this.ratingFilter)) {
         return 'O ano e a avaliacao sao filtrados dentro dos resultados da pesquisa. Podes procurar nas paginas seguintes.';
       }
@@ -92,9 +99,9 @@ const app = Vue.createApp({
     sortBy() {
       this.scheduleFetch();
     },
-    activeFilm(film) {
+    activeFilm(film, previous) {
       document.body.classList.toggle('modal-open', Boolean(film));
-      if (film) this.$nextTick(() => this.$refs.movieDialog?.focus());
+      if (film && !previous) this.$nextTick(() => this.$refs.movieDialog?.focus());
     }
   },
   mounted() {
@@ -165,7 +172,7 @@ const app = Vue.createApp({
         movies = movies.filter(movie => {
           const year = this.movieYear(movie);
           if (!year) return false;
-          if (this.yearFilter === 'classic') return year < 1990;
+          if (this.yearFilter === 'classic') return year >= 1920 && year <= 1989;
           const start = Number(this.yearFilter);
           return year >= start && (start === 2020 || year < start + 10);
         });
@@ -188,6 +195,7 @@ const app = Vue.createApp({
       if (this.view !== 'explore' || this.suspendFetch) return;
       this.cancelCatalog();
       this.items = [];
+      this.visibleCount = PAGE_INCREMENT;
       this.error = '';
       this.cursor = CinemaCatalog.initialCursor();
       this.hasMore = true;
@@ -216,6 +224,7 @@ const app = Vue.createApp({
         if (!this.items.length) this.loading = true;
       } else {
         this.loading = true;
+        this.visibleCount = PAGE_INCREMENT;
         this.items = [];
         this.cursor = CinemaCatalog.initialCursor();
         this.plan = CinemaCatalog.createPlan({
@@ -258,7 +267,7 @@ const app = Vue.createApp({
           this.hasMore = CinemaCatalog.moreAvailable(this.plan, this.cursor, count);
           scanned++;
 
-          if (this.filterMovies(this.items).length >= VISIBLE_TARGET) break;
+          if (this.filterMovies(this.items).length >= this.visibleCount) break;
         }
       } catch (error) {
         if (request !== this.requestId) return;
@@ -278,6 +287,11 @@ const app = Vue.createApp({
           this.loadingMore = false;
         }
       }
+    },
+    loadMore() {
+      if (this.loading || this.loadingMore || !this.canLoadMore) return;
+      this.visibleCount += PAGE_INCREMENT;
+      if (this.filteredFilms.length < this.visibleCount && this.hasMore) this.fetchMovies(true);
     },
     retryCatalog() {
       if (this.plan && this.hasMore) this.fetchMovies(true);
